@@ -121,11 +121,11 @@
                 })
                 .then(buffer => {
                     parseExcelData(buffer);
-                    document.getElementById('fileStatus').innerText = "狀態：已成功自動載入 「護家名單.xlsx」！";
+                    document.getElementById('fileStatus').innerText = "狀態：已成功自動載入！";
                     document.getElementById('fileStatus').style.color = "green";
                 })
                 .catch(err => {
-                    document.getElementById('fileStatus').innerText = "狀態：未能在同資料夾自動載入「護家名單.xlsx」（若以直接雙擊開啟 HTML 需手動點選下方按鈕選擇檔案）。";
+                    document.getElementById('fileStatus').innerText = "狀態：請載入名單";
                     document.getElementById('fileStatus').style.color = "orange";
                 });
         };
