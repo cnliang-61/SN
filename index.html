@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>護家名單比對系統</title>
+    <!-- 引入 SheetJS 讀取 Excel 檔 -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 30px auto;
+            padding: 20px;
+            background-color: #f5f7fa;
+        }
+        h2 {
+            color: #333;
+        }
+        .section {
+            background: #fff;
+            padding: 20px;
+            margin-bottom: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        textarea {
+            width: 100%;
+            height: 120px;
+            padding: 10px;
+            box-sizing: border-box;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-size: 16px;
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            font-size: 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-top: 10px;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 15px;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 10px;
+            text-align: left;
+        }
+        th {
+            background-color: #007bff;
+            color: white;
+        }
+        tr:nth-child(even) {
+            background-color: #f9f9f9;
+        }
+        .status {
+            font-weight: bold;
+            color: #555;
+            margin-bottom: 10px;
+        }
+    </style>
+</head>
+<body>
+
+    <h2>護家名單文字比對工具</h2>
+
+    <!-- 1. 載入 Excel 檔案區塊 -->
+    <div class="section">
+        <h3>1. 載入護家名單</h3>
+        <p class="status" id="fileStatus">狀態：嘗試自動讀取 「護家名單.xlsx」...</p>
+        <input type="file" id="excelFileInput" accept=".xlsx, .xls">
+    </div>
+
+    <!-- 2. 文字輸入與查詢區塊 -->
+    <div class="section">
+        <h3>2. 輸入文字進行比對</h3>
+        <textarea id="inputText" placeholder="請在此貼上或輸入包含人名的文字..."></textarea>
+        <br>
+        <button onclick="searchNames()">開始比對並搜尋</button>
+    </div>
+
+    <!-- 3. 結果顯示區塊 -->
+    <div class="section">
+        <h3>3. 比對結果</h3>
+        <table id="resultTable">
+            <thead>
+                <tr>
+                    <th>姓名</th>
+                    <th>病歷號</th>
+                </tr>
+            </thead>
+            <tbody id="resultBody">
+                <tr>
+                    <td colspan="2" style="text-align:center; color:#888;">尚無比對資料</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <script>
+        let patientData = []; // 儲存 Excel 中的名單 [{姓名: '...', 病歷號: '...'}, ...]
+
+        // 頁面載入時自動嘗試讀取同資料夾下的 "護家名單.xlsx"
+        window.onload = function() {
+            fetch('護家名單.xlsx')
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error("無法自動載入");
+                    }
+                    return response.arrayBuffer();
+                })
+                .then(buffer => {
+                    parseExcelData(buffer);
+                    document.getElementById('fileStatus').innerText = "狀態：已成功自動載入 「護家名單.xlsx」！";
+                    document.getElementById('fileStatus').style.color = "green";
+                })
+                .catch(err => {
+                    document.getElementById('fileStatus').innerText = "狀態：未能在同資料夾自動載入「護家名單.xlsx」（若以直接雙擊開啟 HTML 需手動點選下方按鈕選擇檔案）。";
+                    document.getElementById('fileStatus').style.color = "orange";
+                });
+        };
+
+        // 手動選擇 Excel 檔案處理
+        document.getElementById('excelFileInput').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                parseExcelData(e.target.result);
+                document.getElementById('fileStatus').innerText = `狀態：已手動載入檔案 「${file.name}」！`;
+                document.getElementById('fileStatus').style.color = "green";
+            };
+            reader.readAsArrayBuffer(file);
+        });
+
+        // 解析 Excel 資料
+        function parseExcelData(arrayBuffer) {
+            const data = new Uint8Array(arrayBuffer);
+            const workbook = XLSX.read(data, { type: 'array' });
+
+            // 讀取第一個工作表
+            const firstSheetName = workbook.SheetNames[0];
+            const worksheet = workbook.Sheets[firstSheetName];
+
+            // 轉為 JSON 物件陣列
+            patientData = XLSX.utils.sheet_to_json(worksheet);
+            console.log("已解析的名單資料：", patientData);
+        }
+
+        // 比對邏輯
+        function searchNames() {
+            const text = document.getElementById('inputText').value;
+            const resultBody = document.getElementById('resultBody');
+            resultBody.innerHTML = ''; // 清空先前結果
+
+            if (patientData.length === 0) {
+                alert("請先載入「護家名單.xlsx」檔案！");
+                return;
+            }
+
+            if (!text.trim()) {
+                alert("請輸入要比對的文字！");
+                return;
+            }
+
+            const matches = [];
+
+            // 遍歷 Excel 名單進行比對
+            patientData.forEach(item => {
+                // 取得欄位名稱（支援「姓名」、「病歷號」，或常見名稱變化）
+                const name = item['姓名'] || item['Name'] || item['病人姓名'];
+                const chartNo = item['病歷號'] || item['病歷號碼'] || item['ChartNo'] || '無資料';
+
+                if (name && text.includes(name.toString().trim())) {
+                    matches.push({
+                        name: name.toString().trim(),
+                        chartNo: chartNo.toString().trim()
+                    });
+                }
+            });
+
+            // 顯示結果
+            if (matches.length > 0) {
+                matches.forEach(row => {
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `<td>${row.name}</td><td>${row.chartNo}</td>`;
+                    resultBody.appendChild(tr);
+                });
+            } else {
+                resultBody.innerHTML = '<tr><td colspan="2" style="text-align:center; color:red;">文字中未發現符合護家名單的姓名</td></tr>';
+            }
+        }
+    </script>
+
+</body>
+</html>
