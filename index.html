@@ -177,7 +177,7 @@
             // 遍歷 Excel 名單進行比對
             patientData.forEach(item => {
                 // 取得欄位名稱（支援「姓名」、「病歷號」，或常見名稱變化）
-                const name = item['姓名'] || item['Name'] || item['病人姓名'];
+                const name = item['姓名'] || item['Name'] || item['院民姓名'] || item['病人姓名'];
                 const chartNo = item['病歷號'] || item['病歷號碼'] || item['ChartNo'] || '無資料';
 
                 if (name && text.includes(name.toString().trim())) {
