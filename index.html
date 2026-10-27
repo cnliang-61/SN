@@ -66,7 +66,7 @@
         .status {
             font-weight: bold;
             color: #555;
-            margin-bottom: 10px;
+            margin-top: 10px;
         }
     </style>
 </head>
@@ -76,7 +76,9 @@
 
     <!-- 1. 載入 Excel 檔案區塊 -->
     <div class="section">
+        <h3>1. 載入名單 Excel 檔</h3>
         <input type="file" id="excelFileInput" accept=".xlsx, .xls">
+        <div class="status" id="fileStatus">狀態：尚未載入名單</div>
     </div>
 
     <!-- 2. 文字輸入與查詢區塊 -->
@@ -106,25 +108,34 @@
     </div>
 
     <script>
-        let patientData = []; // 儲存 Excel 中的名單 [{姓名: '...', 病歷號: '...'}, ...]
+        let patientData = []; // 儲存名單 [{name: '...', chartNo: '...'}, ...]
+
+        // 可辨識的欄位名稱
+        const NAME_HEADERS = ['院民姓名', '姓名', '病人姓名', 'Name'];
+        const CHART_HEADERS = ['病歷號', '病歷號碼', 'ChartNo'];
+
+        // 預設標題列為第 2 列（索引 1）；若找不到會自動掃描前 10 列
+        const DEFAULT_HEADER_ROW = 1;
+
+        function setStatus(text, color) {
+            const el = document.getElementById('fileStatus');
+            el.innerText = text;
+            el.style.color = color;
+        }
 
         // 頁面載入時自動嘗試讀取同資料夾下的 "護家名單.xlsx"
         window.onload = function() {
             fetch('護家名單.xlsx')
                 .then(response => {
-                    if (!response.ok) {
-                        throw new Error("無法自動載入");
-                    }
+                    if (!response.ok) throw new Error("無法自動載入");
                     return response.arrayBuffer();
                 })
                 .then(buffer => {
                     parseExcelData(buffer);
-                    document.getElementById('fileStatus').innerText = "狀態：已成功自動載入！";
-                    document.getElementById('fileStatus').style.color = "green";
+                    setStatus(`狀態：已自動載入，共 ${patientData.length} 筆資料`, "green");
                 })
                 .catch(err => {
-                    document.getElementById('fileStatus').innerText = "狀態：請載入名單";
-                    document.getElementById('fileStatus').style.color = "orange";
+                    setStatus("狀態：請載入名單", "orange");
                 });
         };
 
@@ -134,26 +145,72 @@
             if (!file) return;
 
             const reader = new FileReader();
-            reader.onload = function(e) {
-                parseExcelData(e.target.result);
-                document.getElementById('fileStatus').innerText = `狀態：已手動載入檔案 「${file.name}」！`;
-                document.getElementById('fileStatus').style.color = "green";
+            reader.onload = function(ev) {
+                try {
+                    parseExcelData(ev.target.result);
+                    setStatus(`狀態：已載入「${file.name}」，共 ${patientData.length} 筆資料`, "green");
+                } catch (err) {
+                    patientData = [];
+                    setStatus("狀態：" + err.message, "red");
+                }
             };
             reader.readAsArrayBuffer(file);
         });
 
-        // 解析 Excel 資料
+        // 在某一列中尋找欄位索引
+        function findCol(row, candidates) {
+            for (const cand of candidates) {
+                const idx = row.findIndex(c => String(c).trim() === cand);
+                if (idx !== -1) return idx;
+            }
+            return -1;
+        }
+
+        // 解析 Excel 資料（標題列在第 2 列）
         function parseExcelData(arrayBuffer) {
             const data = new Uint8Array(arrayBuffer);
             const workbook = XLSX.read(data, { type: 'array' });
 
             // 讀取第一個工作表
-            const firstSheetName = workbook.SheetNames[0];
-            const worksheet = workbook.Sheets[firstSheetName];
+            const worksheet = workbook.Sheets[workbook.SheetNames[0]];
 
-            // 轉為 JSON 物件陣列
-            patientData = XLSX.utils.sheet_to_json(worksheet);
-            console.log("已解析的名單資料：", patientData);
+            // 以二維陣列讀取，保留所有列（含標題列之前的列）
+            const rows = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '', raw: false });
+
+            // 先檢查預設標題列，找不到再掃描前 10 列
+            let headerRow = -1, nameCol = -1, chartCol = -1;
+            const scanOrder = [DEFAULT_HEADER_ROW];
+            for (let i = 0; i < Math.min(rows.length, 10); i++) {
+                if (i !== DEFAULT_HEADER_ROW) scanOrder.push(i);
+            }
+            for (const i of scanOrder) {
+                if (!rows[i]) continue;
+                const n = findCol(rows[i], NAME_HEADERS);
+                if (n !== -1) {
+                    headerRow = i;
+                    nameCol = n;
+                    chartCol = findCol(rows[i], CHART_HEADERS);
+                    break;
+                }
+            }
+
+            if (headerRow === -1) {
+                throw new Error("找不到「院民姓名」欄位，請確認標題列位置");
+            }
+            if (chartCol === -1) {
+                throw new Error("找不到「病歷號」欄位，請確認標題列位置");
+            }
+
+            // 標題列以下的資料
+            patientData = [];
+            for (let i = headerRow + 1; i < rows.length; i++) {
+                const name = String(rows[i][nameCol] ?? '').trim();
+                const chartNo = String(rows[i][chartCol] ?? '').trim();
+                if (name) {
+                    patientData.push({ name: name, chartNo: chartNo || '無資料' });
+                }
+            }
+            console.log(`標題列：第 ${headerRow + 1} 列，已解析名單：`, patientData);
         }
 
         // 比對邏輯
@@ -172,19 +229,14 @@
                 return;
             }
 
+            // 完全匹配：文字中包含完整姓名；同一人只列一次
+            const seen = new Set();
             const matches = [];
-
-            // 遍歷 Excel 名單進行比對
             patientData.forEach(item => {
-                // 取得欄位名稱（支援「姓名」、「病歷號」，或常見名稱變化）
-                const name = item['姓名'] || item['Name'] || item['院民姓名'] || item['病人姓名'];
-                const chartNo = item['病歷號'] || item['病歷號碼'] || item['ChartNo'] || '無資料';
-
-                if (name && text.includes(name.toString().trim())) {
-                    matches.push({
-                        name: name.toString().trim(),
-                        chartNo: chartNo.toString().trim()
-                    });
+                const key = item.name + '|' + item.chartNo;
+                if (text.includes(item.name) && !seen.has(key)) {
+                    seen.add(key);
+                    matches.push(item);
                 }
             });
 
@@ -192,7 +244,12 @@
             if (matches.length > 0) {
                 matches.forEach(row => {
                     const tr = document.createElement('tr');
-                    tr.innerHTML = `<td>${row.name}</td><td>${row.chartNo}</td>`;
+                    const td1 = document.createElement('td');
+                    const td2 = document.createElement('td');
+                    td1.textContent = row.name;
+                    td2.textContent = row.chartNo;
+                    tr.appendChild(td1);
+                    tr.appendChild(td2);
                     resultBody.appendChild(tr);
                 });
             } else {
