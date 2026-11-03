@@ -213,7 +213,7 @@
             console.log(`標題列：第 ${headerRow + 1} 列，已解析名單：`, patientData);
         }
 
-        // 比對邏輯
+// 比對邏輯
         function searchNames() {
             const text = document.getElementById('inputText').value;
             const resultBody = document.getElementById('resultBody');
@@ -232,13 +232,23 @@
             // 完全匹配：文字中包含完整姓名；同一人只列一次
             const seen = new Set();
             const matches = [];
+
             patientData.forEach(item => {
                 const key = item.name + '|' + item.chartNo;
-                if (text.includes(item.name) && !seen.has(key)) {
+                const firstIndex = text.indexOf(item.name); // 取得姓名在文字中首次出現的位置
+
+                // 如果文字中包含該姓名且尚未記錄過
+                if (firstIndex !== -1 && !seen.has(key)) {
                     seen.add(key);
-                    matches.push(item);
+                    matches.push({
+                        ...item,
+                        index: firstIndex // 記錄首次出現的位置，以便後續排序
+                    });
                 }
             });
+
+            // 依據在文字中出現的位置（index）由小到大排序
+            matches.sort((a, b) => a.index - b.index);
 
             // 顯示結果
             if (matches.length > 0) {
