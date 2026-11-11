@@ -106,13 +106,12 @@
         
         <div class="divider">或</div>
         
-        <!-- 方式 B：文字框手動輸入 -->
-        <label><strong>方式 B：直接貼上姓名及病歷號</strong></label>
-        <textarea id="manualDataInput" style="height: 100px; margin-top: 5px;" placeholder="請在此貼上名單，格式範例：
-張三 123456
-李四, 654321
-王五	999888（包含空白、Tab或逗號分隔皆可，一行一筆）"></textarea>
-        <button class="btn-secondary" onclick="parseTextData()">更新/載入文字名單</button>
+        <!-- 方式 B：文字框直接貼上報表文字 -->
+        <label><strong>方式 B：直接貼上包含病歷號與姓名的報表文字</strong></label>
+        <textarea id="manualDataInput" style="height: 120px; margin-top: 5px;" placeholder="請直接貼上整段報表文字（例如：
+CNH151011  7209355鄭永昌      76男...
+CNH151012  5977541呂良鴻      80男...）"></textarea>
+        <button class="btn-secondary" onclick="parseTextData()">解析並載入文字名單</button>
 
         <div class="status" id="fileStatus">狀態：尚未載入名單</div>
     </div>
@@ -150,7 +149,6 @@
         const NAME_HEADERS = ['院民姓名', '姓名', '病人姓名', 'Name'];
         const CHART_HEADERS = ['病歷號', '病歷號碼', 'ChartNo'];
 
-        // 預設標題列為第 2 列（索引 1）；若找不到會自動掃描前 10 列
         const DEFAULT_HEADER_ROW = 1;
 
         function setStatus(text, color) {
@@ -184,7 +182,6 @@
             reader.onload = function(ev) {
                 try {
                     parseExcelData(ev.target.result);
-                    // 上傳檔案後清空純文字輸入框
                     document.getElementById('manualDataInput').value = '';
                     setStatus(`狀態：已載入「${file.name}」，共 ${patientData.length} 筆資料`, "green");
                 } catch (err) {
@@ -195,45 +192,43 @@
             reader.readAsArrayBuffer(file);
         });
 
-        // 解析文字框直接貼上的姓名及病歷號
+        // 解析文字框直接貼上的報表文字（針對「病歷號+姓名」黏在一起的格式）
         function parseTextData() {
             const rawText = document.getElementById('manualDataInput').value;
             if (!rawText.trim()) {
-                alert("請先輸入或貼上包含姓名與病歷號的內容！");
+                alert("請先輸入或貼上包含病歷號與姓名的內容！");
                 return;
             }
 
             const lines = rawText.split('\n');
             const newPatientData = [];
 
-            lines.forEach(line => {
-                const trimmed = line.trim();
-                if (!trimmed) return;
+            // 正規表達式：尋找「連續數字」後面緊接著「中文字」（例如 7209355鄭永昌）
+            // (\d+) 捕捉數字（病歷號），([\u4e00-\u9fa5]{2,4}) 捕捉 2 到 4 個字的中文姓名
+            const regex = /(\d{4,})([\u4e00-\u9fa5]{2,4})/g;
 
-                // 以逗號、Tab(\t) 或一個以上的空格切分欄位
-                const parts = trimmed.split(/[\t,，\s]+/);
-                
-                if (parts.length >= 2) {
-                    const name = parts[0].trim();
-                    const chartNo = parts[1].trim();
-                    if (name) {
-                        newPatientData.push({ name: name, chartNo: chartNo || '無資料' });
+            lines.forEach(line => {
+                let match;
+                // 用迴圈找出一行裡面可能出現的符合項目
+                while ((match = regex.exec(line)) !== null) {
+                    const chartNo = match[1];
+                    const name = match[2];
+                    
+                    // 避免重複加入相同的病歷號與姓名
+                    if (!newPatientData.some(item => item.name === name && item.chartNo === chartNo)) {
+                        newPatientData.push({ name: name, chartNo: chartNo });
                     }
-                } else if (parts.length === 1 && parts[0]) {
-                    // 若單行只有一個項目，預設為姓名，病歷號填「無資料」
-                    newPatientData.push({ name: parts[0].trim(), chartNo: '無資料' });
                 }
             });
 
             if (newPatientData.length === 0) {
-                alert("無法解析輸入的資料，請檢查格式是否正確！");
+                alert("無法從文字中萃取合適的病歷號與姓名，請確認格式是否包含「數字+中文姓名」！");
                 return;
             }
 
             patientData = newPatientData;
-            // 選擇手動輸入後重置 Excel 選擇器
-            document.getElementById('excelFileInput').value = '';
-            setStatus(`狀態：已手動載入文字名單，共 ${patientData.length} 筆資料`, "green");
+            document.getElementById('excelFileInput').value = ''; // 清空檔案選擇
+            setStatus(`狀態：已從文字成功解析，共 ${patientData.length} 筆病患資料`, "green");
         }
 
         // 在某一列中尋找欄位索引
@@ -284,14 +279,13 @@
                     patientData.push({ name: name, chartNo: chartNo || '無資料' });
                 }
             }
-            console.log(`標題列：第 ${headerRow + 1} 列，已解析名單：`, patientData);
         }
 
         // 比對邏輯
         function searchNames() {
             const text = document.getElementById('inputText').value;
             const resultBody = document.getElementById('resultBody');
-            resultBody.innerHTML = ''; // 清空先前結果
+            resultBody.innerHTML = ''; 
 
             if (patientData.length === 0) {
                 alert("請先載入 Excel 檔案或貼上文字名單！");
@@ -306,6 +300,7 @@
             const seen = new Set();
             const matches = [];
 
+            patientData.pop; // 避免語法干擾
             patientData.forEach(item => {
                 const key = item.name + '|' + item.chartNo;
                 const firstIndex = text.indexOf(item.name);
@@ -333,7 +328,7 @@
                     resultBody.appendChild(tr);
                 });
             } else {
-                resultBody.innerHTML = '<tr><td colspan="2" style="text-align:center; color:red;">文字中未發現符合護家名單的姓名</td></tr>';
+                resultBody.innerHTML = '<tr><td colspan="2" style="text-align:center; color:red;">文字中未發現符合名單的姓名</td></tr>';
             }
         }
     </script>
